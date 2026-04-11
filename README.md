@@ -53,6 +53,14 @@ message    = "geoip-enrich"
 database   = "asn"
 path       = ["autonomous_system_number"]
 output_var = "geo_asn"
+
+[[plugins.params.lookups]]
+name       = "forwarded_country"
+message    = "geoip-enrich"
+database   = "city"
+input      = "client_ip"           # override; defaults to "ip" when omitted
+path       = ["country", "iso_code"]
+output_var = "geo_fwd_country"
 ```
 
 ### Configure HAProxy
@@ -71,11 +79,11 @@ spoe-agent maxmind-agent
     use-backend spoa-hub-backend
 
 spoe-message geoip-enrich
-    args ip=src
+    args ip=src client_ip=req.hdr(X-Forwarded-For)
     event on-frontend-http-request
 ```
 
-To geolocate the original client behind a forwarding proxy, swap `args ip=src` for `args ip=req.hdr(X-Forwarded-For)` — or pick any other HAProxy sample expression.
+Each lookup's `input` field names the SPOE argument it reads (default `ip`); the HAProxy `args` line binds each argument name to a sample expression with `args <name>=<sample-expression>`. The names on both sides must match — in the example above, `country_code` and `as_number` read the `ip` argument bound to `src`, while `forwarded_country` reads the `client_ip` argument bound to `req.hdr(X-Forwarded-For)`. Any HAProxy sample expression works on the right side of the binding (`src`, `req.hdr(...)`, `var(...)`, `src,ipmask(24)`, etc.).
 
 #### HAProxy frontend (`haproxy.cfg`)
 
