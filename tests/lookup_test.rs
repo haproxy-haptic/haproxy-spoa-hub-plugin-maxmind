@@ -1,9 +1,13 @@
+use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::path::Path;
+use std::time::Duration;
 
-use maxmind_plugin::db_type::DatabaseType;
-use maxmind_plugin::lookup::{LoadedDatabase, lookup_ip};
-use maxminddb::Reader;
+use maxmind_plugin::config::{DatabaseEntry, Lookup};
+use maxmind_plugin::lookup::{
+    CompiledLookup, LoadedDatabases, LookupRouter, LookupStatus, execute_lookup,
+};
+use maxmind_plugin::warn_log::WarnOnce;
 
 const FIXTURES: &str = "tests/fixtures/MaxMind-DB/test-data";
 
@@ -14,204 +18,178 @@ fn fixture_path(name: &str) -> String {
         .into_owned()
 }
 
-fn load_fixture(name: &str, db_type: DatabaseType) -> LoadedDatabase {
-    let path = fixture_path(name);
-    LoadedDatabase {
-        db_type,
-        reader: Reader::open_readfile(&path)
-            .unwrap_or_else(|e| panic!("failed to open {path}: {e}")),
-    }
-}
-
-fn find_field<'a>(fields: &'a [(String, String)], name: &str) -> &'a str {
-    fields
-        .iter()
-        .find(|(n, _)| n == name)
-        .map(|(_, v)| v.as_str())
-        .unwrap_or_else(|| panic!("field '{name}' not found in results"))
-}
-
-// --- T009: City database lookup with known IP ---
-
-#[test]
-fn city_lookup_known_ip_returns_expected_fields() {
-    let db = load_fixture("GeoIP2-City-Test.mmdb", DatabaseType::City);
-    let ip: IpAddr = "89.160.20.128".parse().unwrap();
-    let fields = db.db_type.extract_fields(&db.reader, ip, "en");
-
-    assert_eq!(find_field(&fields, "country_iso_code"), "SE");
-    assert_eq!(find_field(&fields, "country_name"), "Sweden");
-    assert_eq!(find_field(&fields, "continent_code"), "EU");
-    assert_eq!(find_field(&fields, "continent_name"), "Europe");
-    assert!(!find_field(&fields, "city_name").is_empty());
-    assert!(!find_field(&fields, "latitude").is_empty());
-    assert!(!find_field(&fields, "longitude").is_empty());
-    assert!(!find_field(&fields, "timezone").is_empty());
-}
-
-// --- T010: ASN database lookup ---
-
-#[test]
-fn asn_lookup_known_ip_returns_expected_fields() {
-    let db = load_fixture("GeoLite2-ASN-Test.mmdb", DatabaseType::Asn);
-    let ip: IpAddr = "1.128.0.0".parse().unwrap();
-    let fields = db.db_type.extract_fields(&db.reader, ip, "en");
-
-    let asn = find_field(&fields, "autonomous_system_number");
-    assert!(!asn.is_empty(), "ASN should not be empty");
-    let asn_num: u32 = asn.parse().expect("ASN should be a number");
-    assert!(asn_num > 0);
-
-    let org = find_field(&fields, "autonomous_system_organization");
-    assert!(!org.is_empty(), "ASN organization should not be empty");
-}
-
-// --- T011: Private IP returns empty strings ---
-
-#[test]
-fn city_lookup_private_ip_returns_empty_fields() {
-    let db = load_fixture("GeoIP2-City-Test.mmdb", DatabaseType::City);
-    let ip: IpAddr = "127.0.0.1".parse().unwrap();
-    let fields = db.db_type.extract_fields(&db.reader, ip, "en");
-
-    for (name, value) in &fields {
-        assert!(
-            value.is_empty(),
-            "field '{name}' should be empty for private IP, got '{value}'"
+fn databases(entries: &[(&str, &str)]) -> LoadedDatabases {
+    let mut map = BTreeMap::new();
+    for (alias, file) in entries {
+        map.insert(
+            (*alias).to_string(),
+            DatabaseEntry {
+                path: fixture_path(file),
+            },
         );
     }
+    LoadedDatabases::open(&map).unwrap_or_else(|e| panic!("failed to open databases: {e}"))
 }
 
-// --- T012: IPv6 lookup ---
-
-#[test]
-fn city_lookup_ipv6_returns_correct_data() {
-    let db = load_fixture("GeoIP2-City-Test.mmdb", DatabaseType::City);
-    let ip: IpAddr = "2001:218::".parse().unwrap();
-    let fields = db.db_type.extract_fields(&db.reader, ip, "en");
-
-    let country = find_field(&fields, "country_iso_code");
-    assert_eq!(country, "JP");
+fn lookup(name: &str, db: &str, path: &[&str], output: &str) -> Lookup {
+    Lookup {
+        name: name.to_string(),
+        message: "msg".to_string(),
+        database: db.to_string(),
+        input: "ip".to_string(),
+        path: path.iter().map(|s| s.to_string()).collect(),
+        output_var: output.to_string(),
+    }
 }
 
-// --- T013: Multiple databases return variables from both ---
+fn compile(l: Lookup) -> CompiledLookup {
+    let router = LookupRouter::from_lookups(vec![l]);
+    // Move the single compiled entry out — easier than re-implementing
+    // CompiledLookup construction in the test crate.
+    let mut compiled = router.compiled;
+    compiled.remove(0)
+}
+
+fn warn() -> WarnOnce {
+    WarnOnce::new(Duration::from_secs(60))
+}
+
+fn ip(s: &str) -> IpAddr {
+    s.parse().unwrap()
+}
+
+// --- T009: Field-path traversal against the bundled fixtures ---
 
 #[test]
-fn lookup_ip_multiple_databases_returns_combined_fields() {
-    let dbs = vec![
-        load_fixture("GeoIP2-City-Test.mmdb", DatabaseType::City),
-        load_fixture("GeoLite2-ASN-Test.mmdb", DatabaseType::Asn),
+fn extract_country_iso_code_from_city_db_returns_value_and_ok_status() {
+    let dbs = databases(&[("city", "GeoIP2-City-Test.mmdb")]);
+    let l = compile(lookup(
+        "country_code",
+        "city",
+        &["country", "iso_code"],
+        "geo_country",
+    ));
+    let (value, status) = execute_lookup(&l, &dbs, ip("89.160.20.128"), &warn());
+    assert_eq!(value, "SE");
+    assert_eq!(status, LookupStatus::Ok);
+}
+
+#[test]
+fn extract_missing_field_returns_empty_and_not_found_status() {
+    let dbs = databases(&[("city", "GeoIP2-City-Test.mmdb")]);
+    let l = compile(lookup("noexist", "city", &["nonexistent_key"], "out"));
+    let (value, status) = execute_lookup(&l, &dbs, ip("89.160.20.128"), &warn());
+    assert!(value.is_empty());
+    assert_eq!(status, LookupStatus::NotFound);
+}
+
+#[test]
+fn extract_non_leaf_field_returns_empty_and_error_status() {
+    let dbs = databases(&[("city", "GeoIP2-City-Test.mmdb")]);
+    // "country" is a map, not a leaf — decode_path::<AnyLeaf> must reject it.
+    let l = compile(lookup("non_leaf", "city", &["country"], "out"));
+    let (value, status) = execute_lookup(&l, &dbs, ip("89.160.20.128"), &warn());
+    assert!(value.is_empty());
+    assert_eq!(status, LookupStatus::Error);
+}
+
+#[test]
+fn extract_localized_name_via_path_returns_value() {
+    let dbs = databases(&[("city", "GeoIP2-City-Test.mmdb")]);
+    let l = compile(lookup(
+        "country_de",
+        "city",
+        &["country", "names", "de"],
+        "out",
+    ));
+    let (value, status) = execute_lookup(&l, &dbs, ip("89.160.20.128"), &warn());
+    assert_eq!(value, "Schweden");
+    assert_eq!(status, LookupStatus::Ok);
+}
+
+#[test]
+fn extract_boolean_field_renders_true_or_false() {
+    let dbs = databases(&[("city", "GeoIP2-City-Test.mmdb")]);
+    // 89.160.20.128 → Sweden, in EU → is_in_european_union = true
+    let l = compile(lookup(
+        "in_eu",
+        "city",
+        &["country", "is_in_european_union"],
+        "out",
+    ));
+    let (value, status) = execute_lookup(&l, &dbs, ip("89.160.20.128"), &warn());
+    assert_eq!(value, "true");
+    assert_eq!(status, LookupStatus::Ok);
+}
+
+#[test]
+fn extract_numeric_field_renders_canonical_decimal() {
+    let dbs = databases(&[("city", "GeoIP2-City-Test.mmdb")]);
+    let l = compile(lookup("lat", "city", &["location", "latitude"], "out"));
+    let (value, status) = execute_lookup(&l, &dbs, ip("89.160.20.128"), &warn());
+    assert_eq!(status, LookupStatus::Ok);
+    let parsed: f64 = value.parse().expect("latitude should be a parseable float");
+    assert!(parsed.is_finite());
+}
+
+#[test]
+fn extract_asn_number_returns_unsigned_integer_string() {
+    let dbs = databases(&[("asn", "GeoLite2-ASN-Test.mmdb")]);
+    let l = compile(lookup(
+        "as_number",
+        "asn",
+        &["autonomous_system_number"],
+        "out",
+    ));
+    let (value, status) = execute_lookup(&l, &dbs, ip("1.128.0.0"), &warn());
+    assert_eq!(status, LookupStatus::Ok);
+    let _: u64 = value
+        .parse()
+        .unwrap_or_else(|e| panic!("ASN should parse as u64: {e}, got '{value}'"));
+}
+
+#[test]
+fn lookup_for_ip_not_in_database_returns_empty_and_not_found_status() {
+    let dbs = databases(&[("city", "GeoIP2-City-Test.mmdb")]);
+    let l = compile(lookup(
+        "country_code",
+        "city",
+        &["country", "iso_code"],
+        "out",
+    ));
+    let (value, status) = execute_lookup(&l, &dbs, ip("127.0.0.1"), &warn());
+    assert!(value.is_empty());
+    assert_eq!(status, LookupStatus::NotFound);
+}
+
+// --- T010: Multi-lookup against the same database loads the file once ---
+
+#[test]
+fn multi_lookup_against_same_database_loads_file_once() {
+    let dbs = databases(&[("city", "GeoIP2-City-Test.mmdb")]);
+    assert_eq!(dbs.readers.len(), 1);
+
+    // Build a router with two lookups against the same alias and verify the
+    // database map is still single-entry (the router does not reopen files).
+    let lookups = vec![
+        lookup("a", "city", &["country", "iso_code"], "out_a"),
+        lookup("b", "city", &["city", "names", "en"], "out_b"),
     ];
-    let ip: IpAddr = "89.160.20.128".parse().unwrap();
-    let fields = lookup_ip(ip, &dbs, "en", None);
-
-    // Should have city fields
-    assert!(fields.iter().any(|(n, _)| n == "country_iso_code"));
-    assert!(fields.iter().any(|(n, _)| n == "city_name"));
-    // Should have ASN fields
-    assert!(fields.iter().any(|(n, _)| n == "autonomous_system_number"));
-}
-
-// --- T030: Additional database type tests ---
-
-#[test]
-fn country_lookup_returns_country_fields() {
-    let db = load_fixture("GeoIP2-Country-Test.mmdb", DatabaseType::Country);
-    let ip: IpAddr = "89.160.20.128".parse().unwrap();
-    let fields = db.db_type.extract_fields(&db.reader, ip, "en");
-
-    assert_eq!(find_field(&fields, "country_iso_code"), "SE");
-    assert_eq!(find_field(&fields, "continent_code"), "EU");
-    // Country DB should not have city fields
-    assert!(fields.iter().all(|(n, _)| n != "city_name"));
+    let router = LookupRouter::from_lookups(lookups);
+    assert_eq!(router.compiled.len(), 2);
+    assert_eq!(dbs.readers.len(), 1);
 }
 
 #[test]
-fn anonymous_ip_lookup_returns_boolean_fields() {
-    let db = load_fixture("GeoIP2-Anonymous-IP-Test.mmdb", DatabaseType::Anonymous);
-    let ip: IpAddr = "1.2.0.1".parse().unwrap();
-    let fields = db.db_type.extract_fields(&db.reader, ip, "en");
-
-    let anon = find_field(&fields, "is_anonymous");
-    assert!(anon == "true" || anon == "false" || anon.is_empty());
-}
-
-#[test]
-fn isp_lookup_returns_provider_fields() {
-    let db = load_fixture("GeoIP2-ISP-Test.mmdb", DatabaseType::Isp);
-    let ip: IpAddr = "1.128.0.0".parse().unwrap();
-    let fields = db.db_type.extract_fields(&db.reader, ip, "en");
-
-    assert!(fields.iter().any(|(n, _)| n == "isp"));
-    assert!(fields.iter().any(|(n, _)| n == "organization"));
-    assert!(fields.iter().any(|(n, _)| n == "autonomous_system_number"));
-}
-
-#[test]
-fn connection_type_lookup_returns_type_field() {
-    let db = load_fixture("GeoIP2-Connection-Type-Test.mmdb", DatabaseType::ConnType);
-    let ip: IpAddr = "1.0.1.0".parse().unwrap();
-    let fields = db.db_type.extract_fields(&db.reader, ip, "en");
-
-    assert!(fields.iter().any(|(n, _)| n == "connection_type"));
-}
-
-#[test]
-fn domain_lookup_returns_domain_field() {
-    let db = load_fixture("GeoIP2-Domain-Test.mmdb", DatabaseType::Domain);
-    let ip: IpAddr = "1.2.0.0".parse().unwrap();
-    let fields = db.db_type.extract_fields(&db.reader, ip, "en");
-
-    assert!(fields.iter().any(|(n, _)| n == "domain"));
-}
-
-// --- T031-T034: Locale and field filtering ---
-
-#[test]
-fn city_lookup_locale_de_returns_german_names() {
-    let db = load_fixture("GeoIP2-City-Test.mmdb", DatabaseType::City);
-    let ip: IpAddr = "89.160.20.128".parse().unwrap();
-    let fields = db.db_type.extract_fields(&db.reader, ip, "de");
-
-    let country_name = find_field(&fields, "country_name");
-    assert_eq!(country_name, "Schweden");
-}
-
-#[test]
-fn city_lookup_unknown_locale_falls_back_to_english() {
-    let db = load_fixture("GeoIP2-City-Test.mmdb", DatabaseType::City);
-    let ip: IpAddr = "89.160.20.128".parse().unwrap();
-    let fields = db.db_type.extract_fields(&db.reader, ip, "xx");
-
-    let country_name = find_field(&fields, "country_name");
-    assert_eq!(country_name, "Sweden");
-}
-
-#[test]
-fn field_allowlist_filters_output() {
-    let dbs = vec![
-        load_fixture("GeoIP2-City-Test.mmdb", DatabaseType::City),
-        load_fixture("GeoLite2-ASN-Test.mmdb", DatabaseType::Asn),
-    ];
-    let ip: IpAddr = "89.160.20.128".parse().unwrap();
-    let allowed = vec![
-        "country_iso_code".to_string(),
-        "autonomous_system_number".to_string(),
-    ];
-    let fields = lookup_ip(ip, &dbs, "en", Some(&allowed));
-
-    assert_eq!(fields.len(), 2);
-    assert!(fields.iter().any(|(n, _)| n == "country_iso_code"));
-    assert!(fields.iter().any(|(n, _)| n == "autonomous_system_number"));
-}
-
-#[test]
-fn default_config_returns_all_fields_in_english() {
-    let dbs = vec![load_fixture("GeoIP2-City-Test.mmdb", DatabaseType::City)];
-    let ip: IpAddr = "89.160.20.128".parse().unwrap();
-    let fields = lookup_ip(ip, &dbs, "en", None);
-
-    // City DB should return 13 fields
-    assert_eq!(fields.len(), 13);
-    assert_eq!(find_field(&fields, "country_name"), "Sweden");
+fn ipv6_lookup_returns_record() {
+    let dbs = databases(&[("city", "GeoIP2-City-Test.mmdb")]);
+    let l = compile(lookup(
+        "country_code",
+        "city",
+        &["country", "iso_code"],
+        "out",
+    ));
+    let (value, status) = execute_lookup(&l, &dbs, ip("2001:218::"), &warn());
+    assert_eq!(value, "JP");
+    assert_eq!(status, LookupStatus::Ok);
 }
