@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking**: Replaced the fixed-type configuration model with an alias-and-lookup model that mirrors the HAProxy Enterprise `maxmind-load` / `maxmind-lookup` converter pair. Operators now load each MMDB file under an arbitrary alias and define named lookups, each binding one SPOE message to one field path inside one database. See the "Migration from 0.1.0" section of the README.
+- **Breaking**: Removed the `locale` configuration key. Localized names are now addressable via the field path (e.g. `path = ["city", "names", "de"]`).
+- **Breaking**: Removed the `fields` allowlist. Operators define only the lookups they want — the allowlist is implicit in the lookup definitions.
+- **Breaking**: Removed the per-database `type` enum (`city`, `country`, `asn`, …). Any MMDB file can be loaded under any alias and addressed by field path.
+- **Breaking**: The plugin no longer ships a fixed `geoip-lookup` message name. Each lookup declares its own `message` name; multiple lookups may share a message name and run in one round-trip.
+
+### Added
+
+- New `path` module: `AnyLeaf` decoder that renders any primitive MMDB leaf (string, integer, float, boolean) as a string via a single `decode_path::<AnyLeaf>` call.
+- New `warn_log` module: bounded warn-once helper deduplicating warnings per `(lookup_name, path)` per 5-minute window, with no new dependencies.
+- Sibling status variable `<output_var>_status` (one of `ok`, `not_found`, `error`) emitted alongside every primary variable so HAProxy ACLs can branch on the lookup outcome without parsing the value.
+- Configurable per-lookup `input` argument name (default `ip`), letting operators feed any HAProxy sample expression into the lookup via the SPOE message.
+
+### Removed
+
+- `db_type` module and the per-type field bundles it implemented. Field selection is now operator-driven through the `lookups` array.
+
+## [0.1.0]
+
 ### Added
 
 - MaxMind GeoIP lookup plugin for haproxy-spoa-hub

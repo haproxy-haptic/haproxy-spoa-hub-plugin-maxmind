@@ -1,21 +1,12 @@
 use std::net::IpAddr;
 
-use abi_stable::std_types::Tuple2;
-use haproxy_spoa_hub_plugin_api::{SpoeMessage, SpoeValue};
+use haproxy_spoa_hub_plugin_api::SpoeValue;
 
-/// Extract the IP address from a geoip-lookup SPOE message.
-pub fn extract_ip(
-    message: &SpoeMessage,
-) -> Result<IpAddr, Box<dyn std::error::Error + Send + Sync>> {
-    for Tuple2(k, v) in message.args.iter() {
-        if k.as_str() == "ip" {
-            return spoe_value_to_ip(v);
-        }
-    }
-    Err("missing required 'ip' argument in geoip-lookup message".into())
-}
-
-/// Convert a SPOP typed value to an IpAddr.
+/// Convert an SPOE typed argument value to an `IpAddr`.
+///
+/// Accepts the three types HAProxy can send for an IP-shaped sample
+/// expression: native IPv4, native IPv6, and a string that parses as either.
+/// Any other SPOP type, or a string that fails to parse, returns an error.
 pub fn spoe_value_to_ip(
     value: &SpoeValue,
 ) -> Result<IpAddr, Box<dyn std::error::Error + Send + Sync>> {
@@ -27,7 +18,7 @@ pub fn spoe_value_to_ip(
             .parse::<IpAddr>()
             .map_err(|e| format!("invalid IP string '{}': {e}", s.as_str()).into()),
         other => Err(format!(
-            "expected IPv4, IPv6, or String for 'ip' argument, got {:?}",
+            "expected IPv4, IPv6, or String for IP argument, got {:?}",
             std::mem::discriminant(other)
         )
         .into()),

@@ -1,12 +1,12 @@
 # HAProxy SPOA Hub — MaxMind Plugin
 
-A [haproxy-spoa-hub](https://gitlab.com/haproxy-haptic/haproxy-spoa-hub) plugin that performs MaxMind GeoIP lookups. Supports all MaxMind database types: City, Country, ASN, Anonymous IP, ISP, Connection Type, and Domain.
+A [haproxy-spoa-hub](https://gitlab.com/haproxy-haptic/haproxy-spoa-hub) plugin that performs MaxMind GeoIP lookups. Supports every MaxMind MMDB database type — City, Country, ASN, Anonymous IP, ISP, Connection Type, Domain — by addressing arbitrary field paths inside the record.
 
 ## Overview
 
-The plugin receives an IP address from HAProxy via the SPOE protocol, looks it up in one or more configured MaxMind MMDB databases, and returns geolocation variables as transaction-scoped HAProxy variables. This brings [HAProxy Enterprise's MaxMind module](https://www.haproxy.com/documentation/haproxy-enterprise/enterprise-modules/geolocation/maxmind/) functionality to HAProxy Community Edition.
+The plugin loads MaxMind MMDB files into memory at startup and exposes their records as transaction-scoped HAProxy variables. Operators define **named lookups**, each binding one HAProxy SPOE message to one field path inside one database, producing one transaction variable plus a sibling status variable. This brings the flexibility of [HAProxy Enterprise's MaxMind module](https://www.haproxy.com/documentation/haproxy-enterprise/enterprise-modules/geolocation/maxmind/) and its `maxmind-lookup` converter to HAProxy Community Edition.
 
-Databases are loaded into memory at startup — there is no per-request disk I/O. Lookups complete in single-digit microseconds.
+Databases are read once at init via the in-memory MMDB reader — there is no per-request disk I/O. A single lookup completes in single-digit microseconds.
 
 ## Quick Start
 
@@ -28,20 +28,31 @@ The output is `target/release/libmaxmind_plugin.so`. Copy it to the hub's plugin
 
 ```toml
 [[plugins]]
-name = "maxmind"
-library = "libmaxmind_plugin.so"
-messages = ["geoip-lookup"]
+name     = "maxmind"
+library  = "libmaxmind_plugin.so"
+messages = ["geoip-enrich"]
 
-[plugins.params]
-locale = "en"
+# Load every MMDB file under an operator-chosen alias.
+[plugins.params.databases]
+city = { path = "/data/GeoLite2-City.mmdb" }
+asn  = { path = "/data/GeoLite2-ASN.mmdb"  }
 
-[[plugins.params.databases]]
-type = "city"
-path = "/data/GeoLite2-City.mmdb"
+# Define exactly the extractions you want. Multiple lookups MAY share a
+# message name; the plugin runs all of them in one round-trip and returns
+# the union of their output variables.
+[[plugins.params.lookups]]
+name       = "country_code"
+message    = "geoip-enrich"
+database   = "city"
+path       = ["country", "iso_code"]
+output_var = "geo_country"
 
-[[plugins.params.databases]]
-type = "asn"
-path = "/data/GeoLite2-ASN.mmdb"
+[[plugins.params.lookups]]
+name       = "as_number"
+message    = "geoip-enrich"
+database   = "asn"
+path       = ["autonomous_system_number"]
+output_var = "geo_asn"
 ```
 
 ### Configure HAProxy
@@ -51,7 +62,7 @@ path = "/data/GeoLite2-ASN.mmdb"
 ```
 [maxmind]
 spoe-agent maxmind-agent
-    messages    geoip-lookup
+    messages    geoip-enrich
     option var-prefix maxmind
     option continue-on-error
     timeout hello      2s
@@ -59,10 +70,12 @@ spoe-agent maxmind-agent
     timeout processing 10ms
     use-backend spoa-hub-backend
 
-spoe-message geoip-lookup
+spoe-message geoip-enrich
     args ip=src
     event on-frontend-http-request
 ```
+
+To geolocate the original client behind a forwarding proxy, swap `args ip=src` for `args ip=req.hdr(X-Forwarded-For)` — or pick any other HAProxy sample expression.
 
 #### HAProxy frontend (`haproxy.cfg`)
 
@@ -71,12 +84,13 @@ frontend www
     bind *:80
     filter spoe engine maxmind config /etc/haproxy/spoe-maxmind.conf
 
-    http-request set-header X-Country %[var(txn.maxmind.country_iso_code)]
-    http-request set-header X-City    %[var(txn.maxmind.city_name)]
-    http-request set-header X-ASN     %[var(txn.maxmind.autonomous_system_number)]
+    http-request set-header X-Country %[var(txn.maxmind.geo_country)]
+    http-request set-header X-ASN     %[var(txn.maxmind.geo_asn)]
 
-    # Geo-based routing
-    use_backend eu-servers if { var(txn.maxmind.continent_code) -m str EU }
+    # Branch on the status variable to distinguish "not in DB" from "ok".
+    use_backend eu-servers \
+        if { var(txn.maxmind.geo_country_status) -m str ok } \
+           { var(txn.maxmind.geo_country) -m str -f /etc/haproxy/eu-iso-codes.lst }
 
     default_backend app
 
@@ -88,126 +102,87 @@ backend spoa-hub-backend
 ### Verify
 
 ```bash
-curl -v http://localhost:80/ 2>&1 | grep -E 'X-(Country|City|ASN)'
+curl -v http://localhost:80/ 2>&1 | grep -E 'X-(Country|ASN)'
 ```
 
 ## Configuration Reference
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `databases` | array of tables | *(required)* | List of MMDB databases to load. Each entry has `type` and `path`. |
-| `locale` | string | `"en"` | Locale for name fields (city, country, continent, subdivision). |
-| `fields` | array of strings | *(all)* | Optional allowlist to restrict which variables are returned. |
+### Top-level
 
-### Database Types
+| Parameter | Type | Description |
+|---|---|---|
+| `databases` | table of tables | Operator-chosen alias → `{ path = "..." }`. Required, must contain at least one entry. |
+| `lookups` | array of tables | Named extractions. Required, must contain at least one entry. |
 
-| Type | Databases | Description |
-|------|-----------|-------------|
-| `city` | GeoIP2-City, GeoLite2-City | Country, city, coordinates, postal code, subdivision, timezone |
-| `country` | GeoIP2-Country, GeoLite2-Country | Country and continent only |
-| `asn` | GeoLite2-ASN | Autonomous system number and organization |
-| `anonymous` | GeoIP2-Anonymous-IP | Proxy, VPN, Tor, and hosting provider detection |
-| `isp` | GeoIP2-ISP | ISP name, organization, and ASN |
-| `conntype` | GeoIP2-Connection-Type | Cable/DSL, Cellular, Corporate, Satellite |
-| `domain` | GeoIP2-Domain | Second-level domain |
+### Per-lookup
 
-### Supported Locales
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | string | *(required)* | Internal identifier. Must be unique across all lookups. Used in log messages and warning deduplication keys. |
+| `message` | string | *(required)* | SPOE message name this lookup answers to. Multiple lookups may share a message name. |
+| `database` | string | *(required)* | Alias of a database loaded under `[plugins.params.databases]`. |
+| `input` | string | `"ip"` | Name of the SPOE message argument carrying the lookup value. Match this in the HAProxy `spoe-message` definition (e.g. `args ip=src` or `args client_ip=req.hdr(X-Forwarded-For)`). |
+| `path` | array of strings | *(required)* | Ordered list of map keys traversing the MMDB record to a leaf value. |
+| `output_var` | string | *(required)* | Transaction-scope variable receiving the leaf value. The plugin also emits `<output_var>_status` carrying `ok`, `not_found`, or `error`. |
 
-`de`, `en`, `es`, `fr`, `ja`, `pt-BR`, `ru`, `zh-CN`. Falls back to `en` when the requested locale is not available for a given record.
+### How field paths work
 
-### Output Variables
+A field path is an ordered list of map keys, just like the path arguments to the HAProxy Enterprise `maxmind-lookup` converter. To find valid paths, consult the MaxMind MMDB schema for your database — for example by running `mmdblookup` against your file and reading the JSON output. Common paths:
 
-All variables are transaction-scoped and namespaced under the plugin name by the hub.
+| Path | Database | Leaf type | Example value |
+|---|---|---|---|
+| `["country", "iso_code"]` | City / Country | string | `SE` |
+| `["country", "names", "de"]` | City / Country | string | `Schweden` |
+| `["country", "is_in_european_union"]` | City / Country | bool | `true` |
+| `["city", "names", "en"]` | City | string | `Stockholm` |
+| `["location", "latitude"]` | City | float | `59.3293` |
+| `["location", "time_zone"]` | City | string | `Europe/Stockholm` |
+| `["postal", "code"]` | City | string | `11122` |
+| `["autonomous_system_number"]` | ASN / ISP | int | `29518` |
+| `["autonomous_system_organization"]` | ASN / ISP | string | `Bredband2 AB` |
+| `["isp"]` | ISP | string | `Comhem` |
+| `["is_tor_exit_node"]` | Anonymous IP | bool | `true` |
+| `["connection_type"]` | Connection Type | string | `Cable/DSL` |
+| `["domain"]` | Domain | string | `example.com` |
 
-#### City / Country
+Strings render verbatim, integers and floats use their canonical decimal form, and booleans become the literal `"true"` or `"false"`. Missing keys and addresses-not-in-database both yield an empty string with status `not_found`. A path that lands on a non-leaf node (map or array) yields an empty string with status `error` and a one-time warning naming the offending lookup.
 
-| Variable | Description |
-|----------|-------------|
-| `country_iso_code` | ISO 3166-1 two-letter code (e.g., `US`) |
-| `country_name` | Localized country name |
-| `continent_code` | Two-letter code (`AF`, `AN`, `AS`, `EU`, `NA`, `OC`, `SA`) |
-| `continent_name` | Localized continent name |
-| `is_in_european_union` | `true` or `false` |
+### Status variable
 
-#### City (additional)
+For every lookup the plugin emits a sibling `<output_var>_status` variable carrying one of:
 
-| Variable | Description |
-|----------|-------------|
-| `city_name` | Localized city name |
-| `latitude` | WGS84 latitude |
-| `longitude` | WGS84 longitude |
-| `postal_code` | Postal/ZIP code |
-| `timezone` | IANA time zone (e.g., `America/New_York`) |
-| `accuracy_radius` | Accuracy radius in kilometers |
-| `subdivision_iso_code` | ISO 3166-2 code of the first subdivision |
-| `subdivision_name` | Localized subdivision name |
+| Value | Meaning |
+|---|---|
+| `ok` | Leaf value extracted successfully — the primary variable carries it. |
+| `not_found` | Either the IP is not present in the database, or the configured field path does not exist in the matching record. The primary variable is empty. |
+| `error` | The input value was not a valid IP, or the field path landed on a non-leaf node (operator typo). The primary variable is empty. |
 
-#### ASN
+Operators who don't need this signal can ignore it; operators who do can branch on it from HAProxy ACLs without parsing the primary value.
 
-| Variable | Description |
-|----------|-------------|
-| `autonomous_system_number` | ASN number |
-| `autonomous_system_organization` | Organization name |
+### Error behavior
 
-#### Anonymous IP
+- **Plugin receives a message name with no lookups bound**: Returns a hub-level error.
+- **Lookup's declared `input` argument is missing from the message**: Returns a hub-level error naming both the lookup and the missing argument — this is a configuration mismatch between HAProxy and the hub.
+- **Invalid configuration at startup** (unknown database alias, duplicate output variable, duplicate lookup name, missing required field, legacy 0.1.0 keys): Plugin fails to initialize with a descriptive error.
+- **Per-request data anomalies** (IP not in DB, malformed input value, missing field path, non-leaf path): Sets the output variable to empty, sets the status variable accordingly, and emits a warning at most once per `(lookup_name, path)` per dedup window. The SPOE transaction is never aborted by data anomalies.
 
-| Variable | Description |
-|----------|-------------|
-| `is_anonymous` | Any sort of anonymous network |
-| `is_anonymous_vpn` | Registered anonymous VPN provider |
-| `is_hosting_provider` | Hosting or VPN provider |
-| `is_public_proxy` | Public proxy |
-| `is_residential_proxy` | Residential proxy |
-| `is_tor_exit_node` | Tor exit node |
+## Migration from 0.1.0
 
-#### ISP
+The 0.2.0 configuration shape replaces the 0.1.0 type-based model entirely. Upgrading is a one-time edit of your hub config and HAProxy variable references.
 
-| Variable | Description |
-|----------|-------------|
-| `isp` | ISP name |
-| `organization` | Organization name |
-| `autonomous_system_number` | ASN number |
-| `autonomous_system_organization` | Organization name |
+| 0.1.0 | 0.2.0 |
+|---|---|
+| `[[plugins.params.databases]]` array with `type = "city"` | `[plugins.params.databases]` table with operator-chosen alias and a `path` field |
+| Hard-coded variable bundle (`country_iso_code`, `city_name`, …) | One `[[plugins.params.lookups]]` entry per variable you actually want, with explicit `path` and `output_var` |
+| `locale = "de"` | `path = ["city", "names", "de"]` (per-lookup, fully addressable) |
+| `fields = [...]` allowlist | Define only the lookups you want — the allowlist is implicit in the lookup definitions |
+| Single message name `geoip-lookup` | Operator-chosen `message` per lookup; multiple lookups may share a message name |
 
-#### Connection Type
-
-| Variable | Description |
-|----------|-------------|
-| `connection_type` | `Cable/DSL`, `Cellular`, `Corporate`, `Satellite` |
-
-#### Domain
-
-| Variable | Description |
-|----------|-------------|
-| `domain` | Second-level domain (e.g., `example.com`) |
-
-### Restricting Output
-
-Use the `fields` parameter to return only the variables you need:
-
-```toml
-[plugins.params]
-fields = ["country_iso_code", "city_name", "autonomous_system_number"]
-```
-
-When `fields` is omitted, all variables from all configured databases are returned.
-
-### Error Behavior
-
-- **Missing `ip` argument**: Returns an error (logged by the hub).
-- **IP not found in database**: Returns empty strings for all fields of that database type.
-- **Missing or invalid database path**: Plugin fails to initialize with a descriptive error message.
-- **Invalid IP string**: Returns an error (logged by the hub).
+The 0.1.0 keys (`type`, `locale`, `fields`) are not accepted by 0.2.0 — the plugin fails fast at init with an error pointing back at this section.
 
 ## Performance
 
-Plugin computation (Criterion benchmarks, test MMDB fixtures):
-
-| Lookup | Time |
-|--------|------|
-| City (13 fields) | 3.2 µs |
-| ASN (2 fields) | 276 ns |
-| City + ASN combined | 4.2 µs |
+Single-database lookup against a loaded MMDB stays well under 1 ms p99 on commodity hardware. Adding a second lookup against the same already-loaded database carries no additional load cost; the file is opened once regardless of how many lookups reference it.
 
 ## Development
 
@@ -215,7 +190,7 @@ Plugin computation (Criterion benchmarks, test MMDB fixtures):
 
 ```bash
 cargo build --release            # Build plugin .so
-cargo test                       # Unit + integration tests (26 tests)
+cargo test                       # Unit + integration tests
 cargo bench                      # Criterion microbenchmarks
 cargo clippy -- -D warnings      # Lint
 ```
@@ -224,15 +199,17 @@ cargo clippy -- -D warnings      # Lint
 
 ```
 src/
-  lib.rs              Module declarations + test helpers
-  plugin.rs           SpoePlugin implementation (define_plugin! macro)
-  config.rs           Plugin configuration (databases, locale, fields)
-  db_type.rs          DatabaseType enum and per-type field extraction
-  lookup.rs           Database loading and IP lookup orchestration
+  lib.rs              Module declarations
+  plugin.rs           SpoePlugin glue + process_message routing
+  config.rs           PluginConfig, DatabaseEntry, Lookup parsing & validation
+  lookup.rs           LoadedDatabases, LookupRouter, execute_lookup
+  path.rs             AnyLeaf decoder + field-path compilation
+  ip.rs               SpoeValue → IpAddr conversion
+  warn_log.rs         Bounded warn-once helper
 
 tests/
-  lookup_test.rs      Lookup tests for all 7 database types, locale, filtering
-  plugin_test.rs      Configuration parsing, IP extraction, schema validation
+  lookup_test.rs      Field-path traversal across all primitive leaf types
+  plugin_test.rs      Config parsing, IP extraction, schema, end-to-end routing
   fixtures/           MaxMind test MMDB files (git submodule)
 
 benches/
