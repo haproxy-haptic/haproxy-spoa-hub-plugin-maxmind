@@ -1,0 +1,3 @@
+[submodule "tests/fixtures/MaxMind-DB"]
+	path = tests/fixtures/MaxMind-DB
+	url = https://github.com/maxmind/MaxMind-DB.git
