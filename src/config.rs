@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use abi_stable::std_types::Tuple2;
 use haproxy_spoa_hub_plugin_api::{ConfigValue, PluginContext};
 
-const DEFAULT_INPUT_ARG: &str = "ip";
+const DEFAULT_INPUT_ARG: &str = "input";
 
 /// Operator-defined database alias bound to a single MMDB file.
 #[derive(Debug, Clone)]

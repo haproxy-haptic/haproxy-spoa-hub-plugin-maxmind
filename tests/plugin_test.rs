@@ -164,12 +164,12 @@ fn config_with_databases_map_and_lookups_parses_correctly() {
     let config = PluginConfig::from_context(&ctx).unwrap();
     assert_eq!(config.databases.len(), 1);
     assert_eq!(config.lookups.len(), 1);
-    assert_eq!(config.lookups[0].input, "ip");
+    assert_eq!(config.lookups[0].input, "input");
     assert_eq!(config.lookups[0].path, vec!["country", "iso_code"]);
 }
 
 #[test]
-fn config_lookup_input_defaults_to_ip() {
+fn config_lookup_input_defaults_to_input() {
     let city = fixture_path("GeoIP2-City-Test.mmdb");
     let ctx = make_context(&[
         ("databases", databases_table(&[("city", &city)])),
@@ -186,7 +186,7 @@ fn config_lookup_input_defaults_to_ip() {
         ),
     ]);
     let config = PluginConfig::from_context(&ctx).unwrap();
-    assert_eq!(config.lookups[0].input, "ip");
+    assert_eq!(config.lookups[0].input, "input");
 }
 
 #[test]
@@ -411,7 +411,7 @@ fn process_message_emits_primary_and_status_variables() {
     let (dbs, router, warn) = build_state(&ctx);
     let msg = make_message(
         "geoip-enrich",
-        &[("ip", SpoeValue::Ipv4([89, 160, 20, 128]))],
+        &[("input", SpoeValue::Ipv4([89, 160, 20, 128]))],
     );
     let vars = process_message(&dbs, &router, &warn, &msg).unwrap();
     assert_eq!(vars.len(), 2);
@@ -437,7 +437,10 @@ fn process_message_for_unknown_message_returns_error() {
         ),
     ]);
     let (dbs, router, warn) = build_state(&ctx);
-    let msg = make_message("something-else", &[("ip", SpoeValue::Ipv4([1, 1, 1, 1]))]);
+    let msg = make_message(
+        "something-else",
+        &[("input", SpoeValue::Ipv4([1, 1, 1, 1]))],
+    );
     let err = process_message(&dbs, &router, &warn, &msg).unwrap_err();
     assert!(err.contains("something-else"));
 }
@@ -460,7 +463,7 @@ fn process_message_for_private_ip_emits_not_found_status() {
         ),
     ]);
     let (dbs, router, warn) = build_state(&ctx);
-    let msg = make_message("msg", &[("ip", SpoeValue::Ipv4([127, 0, 0, 1]))]);
+    let msg = make_message("msg", &[("input", SpoeValue::Ipv4([127, 0, 0, 1]))]);
     let vars = process_message(&dbs, &router, &warn, &msg).unwrap();
     assert_var(&vars, "out", "");
     assert_var(&vars, "out_status", "not_found");
@@ -486,7 +489,7 @@ fn process_message_for_invalid_ip_string_emits_error_status() {
     let (dbs, router, warn) = build_state(&ctx);
     let msg = make_message(
         "msg",
-        &[("ip", SpoeValue::String(RString::from("not-an-ip")))],
+        &[("input", SpoeValue::String(RString::from("not-an-ip")))],
     );
     let vars = process_message(&dbs, &router, &warn, &msg).unwrap();
     assert_var(&vars, "out", "");
@@ -543,7 +546,7 @@ fn lookup_reads_custom_input_arg_name() {
     let msg = make_message(
         "msg",
         &[
-            ("ip", SpoeValue::Ipv4([127, 0, 0, 1])),
+            ("input", SpoeValue::Ipv4([127, 0, 0, 1])),
             ("client_ip", SpoeValue::Ipv4([89, 160, 20, 128])),
         ],
     );
@@ -591,7 +594,7 @@ fn multi_lookup_per_message_executes_all_and_returns_union() {
     let (dbs, router, warn) = build_state(&ctx);
     let msg = make_message(
         "geoip-enrich",
-        &[("ip", SpoeValue::Ipv4([89, 160, 20, 128]))],
+        &[("input", SpoeValue::Ipv4([89, 160, 20, 128]))],
     );
     let vars = process_message(&dbs, &router, &warn, &msg).unwrap();
     assert_eq!(
@@ -634,7 +637,7 @@ fn removing_a_lookup_removes_only_its_variables() {
     ]);
 
     let dbs_table = databases_table(&[("city", &city), ("asn", &asn)]);
-    let msg = make_message("m", &[("ip", SpoeValue::Ipv4([89, 160, 20, 128]))]);
+    let msg = make_message("m", &[("input", SpoeValue::Ipv4([89, 160, 20, 128]))]);
 
     let ctx3 = make_context(&[("databases", dbs_table.clone()), ("lookups", three_lookups)]);
     let (dbs3, r3, w3) = build_state(&ctx3);

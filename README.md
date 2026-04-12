@@ -58,7 +58,7 @@ output_var = "geo_asn"
 name       = "forwarded_country"
 message    = "geoip-enrich"
 database   = "city"
-input      = "client_ip"           # override; defaults to "ip" when omitted
+input      = "client_ip"           # override; defaults to "input" when omitted
 path       = ["country", "iso_code"]
 output_var = "geo_fwd_country"
 ```
@@ -79,11 +79,11 @@ spoe-agent maxmind-agent
     use-backend spoa-hub-backend
 
 spoe-message geoip-enrich
-    args ip=src client_ip=req.hdr(X-Forwarded-For)
+    args input=src client_ip=req.hdr(X-Forwarded-For)
     event on-frontend-http-request
 ```
 
-Each lookup's `input` field names the SPOE argument it reads (default `ip`); the HAProxy `args` line binds each argument name to a sample expression with `args <name>=<sample-expression>`. The names on both sides must match — in the example above, `country_code` and `as_number` read the `ip` argument bound to `src`, while `forwarded_country` reads the `client_ip` argument bound to `req.hdr(X-Forwarded-For)`. Any HAProxy sample expression works on the right side of the binding (`src`, `req.hdr(...)`, `var(...)`, `src,ipmask(24)`, etc.).
+Each lookup's `input` field names the SPOE argument it reads (default `input`); the HAProxy `args` line binds each argument name to a sample expression with `args <name>=<sample-expression>`. The names on both sides must match — in the example above, `country_code` and `as_number` read the `input` argument bound to `src`, while `forwarded_country` reads the `client_ip` argument bound to `req.hdr(X-Forwarded-For)`. Any HAProxy sample expression works on the right side of the binding (`src`, `req.hdr(...)`, `var(...)`, `src,ipmask(24)`, etc.).
 
 #### HAProxy frontend (`haproxy.cfg`)
 
@@ -129,7 +129,7 @@ curl -v http://localhost:80/ 2>&1 | grep -E 'X-(Country|ASN)'
 | `name` | string | *(required)* | Internal identifier. Must be unique across all lookups. Used in log messages and warning deduplication keys. |
 | `message` | string | *(required)* | SPOE message name this lookup answers to. Multiple lookups may share a message name. |
 | `database` | string | *(required)* | Alias of a database loaded under `[plugins.params.databases]`. |
-| `input` | string | `"ip"` | Name of the SPOE message argument carrying the lookup value. Match this in the HAProxy `spoe-message` definition (e.g. `args ip=src` or `args client_ip=req.hdr(X-Forwarded-For)`). |
+| `input` | string | `"input"` | Name of the SPOE message argument carrying the lookup value. Match this in the HAProxy `spoe-message` definition (e.g. `args input=src` or `args client_ip=req.hdr(X-Forwarded-For)`). |
 | `path` | array of strings | *(required)* | Ordered list of map keys traversing the MMDB record to a leaf value. |
 | `output_var` | string | *(required)* | Transaction-scope variable receiving the leaf value. The plugin also emits `<output_var>_status` carrying `ok`, `not_found`, or `error`. |
 
