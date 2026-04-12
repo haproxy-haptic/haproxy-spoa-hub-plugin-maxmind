@@ -187,5 +187,13 @@ pub fn execute_lookup(
 pub fn load(config: PluginConfig) -> Result<(LoadedDatabases, LookupRouter), String> {
     let databases = LoadedDatabases::open(&config.databases)?;
     let router = LookupRouter::from_lookups(config.lookups);
+
+    // Log unreferenced database aliases so operators notice unused loads.
+    for alias in databases.readers.keys() {
+        if !router.compiled.iter().any(|l| l.database == *alias) {
+            log::info!("database '{alias}' is configured but not referenced by any lookup");
+        }
+    }
+
     Ok((databases, router))
 }
