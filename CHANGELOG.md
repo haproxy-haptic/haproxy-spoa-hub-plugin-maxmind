@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-04-21
+
 ### Changed
 
 - **Breaking**: Replaced the fixed-type configuration model with an alias-and-lookup model that mirrors the HAProxy Enterprise `maxmind-load` / `maxmind-lookup` converter pair. Operators now load each MMDB file under an arbitrary alias and define named lookups, each binding one SPOE message to one field path inside one database. See the "Migration from 0.1.0" section of the README.
