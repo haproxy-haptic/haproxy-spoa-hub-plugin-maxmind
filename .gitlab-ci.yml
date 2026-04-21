@@ -119,18 +119,28 @@ build:
   parallel:
     matrix:
       - ARCH: amd64
-        RUST_TARGET: x86_64-unknown-linux-gnu
-        CROSS_PKG: ""
-        CROSS_LINKER: ""
       - ARCH: arm64
-        RUST_TARGET: aarch64-unknown-linux-gnu
-        CROSS_PKG: gcc-aarch64-linux-gnu
-        CROSS_LINKER: aarch64-linux-gnu-gcc
       - ARCH: armv7
-        RUST_TARGET: armv7-unknown-linux-gnueabihf
-        CROSS_PKG: gcc-arm-linux-gnueabihf
-        CROSS_LINKER: arm-linux-gnueabihf-gcc
   before_script:
+    - |
+      case "${ARCH}" in
+        amd64)
+          RUST_TARGET="x86_64-unknown-linux-gnu"
+          CROSS_PKG=""
+          CROSS_LINKER=""
+          ;;
+        arm64)
+          RUST_TARGET="aarch64-unknown-linux-gnu"
+          CROSS_PKG="gcc-aarch64-linux-gnu"
+          CROSS_LINKER="aarch64-linux-gnu-gcc"
+          ;;
+        armv7)
+          RUST_TARGET="armv7-unknown-linux-gnueabihf"
+          CROSS_PKG="gcc-arm-linux-gnueabihf"
+          CROSS_LINKER="arm-linux-gnueabihf-gcc"
+          ;;
+      esac
+    - export RUST_TARGET
     - rustup target add "${RUST_TARGET}"
     - |
       if [ -n "${CROSS_PKG}" ]; then
@@ -182,7 +192,7 @@ build:
 smoke-amd64:
   extends: .smoke-base
   needs:
-    - job: "build: [amd64, x86_64-unknown-linux-gnu, , ]"
+    - job: "build: [amd64]"
       artifacts: true
   script:
     - tests/smoke/run.sh --arch amd64
@@ -190,7 +200,7 @@ smoke-amd64:
 smoke-arm64:
   extends: .smoke-base
   needs:
-    - job: "build: [arm64, aarch64-unknown-linux-gnu, gcc-aarch64-linux-gnu, aarch64-linux-gnu-gcc]"
+    - job: "build: [arm64]"
       artifacts: true
   script:
     - tests/smoke/run.sh --arch arm64
@@ -198,7 +208,7 @@ smoke-arm64:
 smoke-armv7:
   extends: .smoke-base
   needs:
-    - job: "build: [armv7, armv7-unknown-linux-gnueabihf, gcc-arm-linux-gnueabihf, arm-linux-gnueabihf-gcc]"
+    - job: "build: [armv7]"
       artifacts: true
   script:
     - tests/smoke/run.sh --arch armv7
@@ -224,15 +234,15 @@ release:
       awk -v ver="${VERSION}" '
         /^## \[/ { if (found) exit; if (index($0, "[" ver "]")) found=1 }
         found { print }
-      ' CHANGELOG.md > /tmp/release-notes.md
-      if [ ! -s /tmp/release-notes.md ]; then
-        echo "Release ${CI_COMMIT_TAG}" > /tmp/release-notes.md
+      ' CHANGELOG.md > release-notes.md
+      if [ ! -s release-notes.md ]; then
+        echo "Release ${CI_COMMIT_TAG}" > release-notes.md
       fi
-      cat /tmp/release-notes.md
+      cat release-notes.md
   release:
     tag_name: $CI_COMMIT_TAG
     name: "$CI_COMMIT_TAG"
-    description: /tmp/release-notes.md
+    description: ./release-notes.md
     assets:
       links:
         - name: "${LIB_NAME}-amd64-glibc${GLIBC_VERSION}.so"
