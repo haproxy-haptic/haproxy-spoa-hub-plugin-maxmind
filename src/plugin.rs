@@ -1,9 +1,9 @@
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use abi_stable::std_types::{RString, RVec, Tuple2};
+use abi_stable::std_types::RVec;
 use haproxy_spoa_hub_plugin_api::{
-    ProcessingResult, SpoeMessage, SpoeValue, TxnVariable, VarScope, define_plugin,
+    ProcessingResult, SpoeMessage, SpoeValue, TxnVariable, define_plugin,
 };
 
 use crate::config::PluginConfig;
@@ -43,7 +43,7 @@ pub fn process_message(
 
         // Find the configured input argument; missing argument is a hard
         // hub-level error per FR-008 / contracts doc.
-        let arg_value = find_arg(message, &lookup.input).ok_or_else(|| {
+        let arg_value = message.get(&lookup.input).ok_or_else(|| {
             format!(
                 "lookup '{}' missing required argument '{}'",
                 lookup.name, lookup.input
@@ -64,28 +64,17 @@ pub fn process_message(
             }
         };
 
-        variables.push(string_var(&lookup.output_var, &value));
-        variables.push(string_var(&lookup.status_var, status.as_str()));
+        variables.push(TxnVariable::transaction(
+            &*lookup.output_var,
+            SpoeValue::String(value.into()),
+        ));
+        variables.push(TxnVariable::transaction(
+            &*lookup.status_var,
+            SpoeValue::String(status.as_str().into()),
+        ));
     }
 
     Ok(variables)
-}
-
-fn find_arg<'a>(message: &'a SpoeMessage, name: &str) -> Option<&'a SpoeValue> {
-    for Tuple2(k, v) in message.args.iter() {
-        if k.as_str() == name {
-            return Some(v);
-        }
-    }
-    None
-}
-
-fn string_var(name: &str, value: &str) -> TxnVariable {
-    TxnVariable {
-        scope: VarScope::Transaction,
-        name: RString::from(name),
-        value: SpoeValue::String(RString::from(value)),
-    }
 }
 
 define_plugin!(MaxmindPlugin, {
