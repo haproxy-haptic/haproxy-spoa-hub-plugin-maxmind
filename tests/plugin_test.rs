@@ -2,8 +2,9 @@ use std::net::Ipv4Addr;
 use std::path::Path;
 use std::time::Duration;
 
-use abi_stable::std_types::{RHashMap, RString, RVec};
-use haproxy_spoa_hub_plugin_api::{ConfigValue, PluginContext, SpoeMessage, SpoeValue, VarScope};
+use haproxy_spoa_hub_plugin_api::{
+    ConfigValue, PluginContext, RHashMap, RString, RVec, SpoeMessage, SpoeValue, VarScope,
+};
 
 use maxmind_plugin::config::PluginConfig;
 use maxmind_plugin::lookup::{LookupRouter, load};

@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 
-use abi_stable::std_types::Tuple2;
-use haproxy_spoa_hub_plugin_api::{ConfigValue, PluginContext};
+use haproxy_spoa_hub_plugin_api::{ConfigValue, PluginContext, RHashMap, RString, Tuple2};
 
 const DEFAULT_INPUT_ARG: &str = "input";
 
@@ -147,7 +146,7 @@ impl PluginConfig {
 }
 
 fn parse_databases(
-    config: &abi_stable::std_types::RHashMap<abi_stable::std_types::RString, ConfigValue>,
+    config: &RHashMap<RString, ConfigValue>,
 ) -> Result<BTreeMap<String, DatabaseEntry>, String> {
     let value = config
         .get("databases")
@@ -191,9 +190,7 @@ fn parse_databases(
     Ok(out)
 }
 
-fn parse_lookups(
-    config: &abi_stable::std_types::RHashMap<abi_stable::std_types::RString, ConfigValue>,
-) -> Result<Vec<Lookup>, String> {
+fn parse_lookups(config: &RHashMap<RString, ConfigValue>) -> Result<Vec<Lookup>, String> {
     let value = config
         .get("lookups")
         .ok_or_else(|| "missing required 'lookups' configuration array".to_string())?;
@@ -249,7 +246,7 @@ fn parse_lookups(
 }
 
 fn required_string(
-    table: &abi_stable::std_types::RHashMap<abi_stable::std_types::RString, ConfigValue>,
+    table: &RHashMap<RString, ConfigValue>,
     key: &str,
     context: &str,
 ) -> Result<String, String> {

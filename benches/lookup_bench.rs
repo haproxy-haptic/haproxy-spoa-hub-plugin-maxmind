@@ -2,9 +2,8 @@ use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::time::Duration;
 
-use abi_stable::std_types::{RHashMap, RString};
 use criterion::{Criterion, criterion_group, criterion_main};
-use haproxy_spoa_hub_plugin_api::{SpoeMessage, SpoeValue};
+use haproxy_spoa_hub_plugin_api::{RHashMap, RString, SpoeMessage, SpoeValue};
 use maxmind_plugin::config::{DatabaseEntry, Lookup};
 use maxmind_plugin::lookup::{CompiledLookup, LoadedDatabases, LookupRouter, execute_lookup};
 use maxmind_plugin::plugin::process_message;
