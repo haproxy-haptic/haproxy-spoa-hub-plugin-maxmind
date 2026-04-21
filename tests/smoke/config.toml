@@ -1,0 +1,22 @@
+plugin_dir = "/etc/haproxy-spoa-hub/plugins"
+default_timeout_ms = 500
+log_level = "debug"
+
+[[listeners]]
+type = "tcp"
+address = "0.0.0.0:12345"
+
+[[plugins]]
+name = "maxmind"
+library = "libmaxmind_plugin.so"
+messages = ["geoip-enrich"]
+
+[plugins.params.databases]
+city = { path = "/data/GeoIP2-City-Test.mmdb" }
+
+[[plugins.params.lookups]]
+name       = "country_code"
+message    = "geoip-enrich"
+database   = "city"
+path       = ["country", "iso_code"]
+output_var = "geo_country"
