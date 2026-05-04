@@ -1,9 +1,8 @@
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use abi_stable::std_types::RVec;
 use haproxy_spoa_hub_plugin_api::{
-    ProcessingResult, SpoeMessage, SpoeValue, TxnVariable, define_plugin,
+    ProcessingResult, RVec, SpoeMessage, SpoeValue, TxnVariable, define_plugin,
 };
 
 use crate::config::PluginConfig;
