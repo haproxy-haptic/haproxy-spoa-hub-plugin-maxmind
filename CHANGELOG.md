@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-15
+
+### Added
+
+- **Prometheus metrics** via the `haproxy-spoa-hub` v0.6.0 plugin-API v2 vtable. Surfaced through the hub's `/metrics` endpoint under the `plugin_maxmind_` prefix.
+
+  | metric                    | kind      | labels               |
+  |---------------------------|-----------|----------------------|
+  | `lookups_total`           | counter   | `lookup`, `status`   |
+  | `lookup_duration_seconds` | histogram | _(no labels)_        |
+
+  `lookup` is the per-config lookup name; `status` is `LookupStatus::as_str()` (`ok`, `not_found`, `error`). Histogram is unlabelled by lookup — overall p50/p99 is the primary operational question and the unlabelled series keeps the labelset bounded for fan-out deployments.
+
+### Changed
+
+- Plugin-API dep `^0.5` → `^0.6` to pick up `MetricRecorder` and the `metrics_static` macro arm. Vtable change is append-only — this plugin's v0.4.0 .so still loads on v0.5.x hubs (metrics silent there).
+
 ## [0.3.0] - 2026-05-04
 
 ### Changed
