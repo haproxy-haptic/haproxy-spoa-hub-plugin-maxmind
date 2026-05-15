@@ -2,7 +2,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use haproxy_spoa_hub_plugin_api::{
-    ProcessingResult, RVec, SpoeMessage, SpoeValue, TxnVariable, define_plugin,
+    MetricRecorder, ProcessingResult, RVec, SpoeMessage, SpoeValue, TxnVariable, define_plugin,
 };
 
 use crate::config::PluginConfig;
@@ -11,6 +11,9 @@ use crate::lookup::{LoadedDatabases, LookupRouter, LookupStatus, execute_lookup,
 use crate::warn_log::WarnOnce;
 
 const WARN_DEDUP_WINDOW: Duration = Duration::from_secs(300);
+
+/// Plugin-scoped metric recorder; silent no-op on pre-v0.6 hubs.
+static METRICS: MetricRecorder = MetricRecorder::new();
 
 pub struct PluginState {
     pub databases: LoadedDatabases,
@@ -49,6 +52,7 @@ pub fn process_message(
             )
         })?;
 
+        let started = std::time::Instant::now();
         let (value, status) = match spoe_value_to_ip(arg_value) {
             Ok(ip) => execute_lookup(lookup, databases, ip, warn_once),
             Err(e) => {
@@ -62,6 +66,19 @@ pub fn process_message(
                 (String::new(), LookupStatus::Error)
             }
         };
+        let elapsed = started.elapsed();
+
+        // Hub adds `plugin_maxmind_` prefix. `lookup` is the lookup
+        // name (per-config), `status` is one of LookupStatus's
+        // bounded set (hit/miss/error). The histogram is unlabelled
+        // by lookup because most ops care about overall lookup
+        // latency, not per-lookup-name p99 tails.
+        METRICS.counter(
+            "lookups_total",
+            &[("lookup", &*lookup.name), ("status", status.as_str())],
+            1,
+        );
+        METRICS.histogram("lookup_duration_seconds", &[], elapsed.as_secs_f64());
 
         variables.push(TxnVariable::transaction(
             &*lookup.output_var,
@@ -129,4 +146,6 @@ define_plugin!(MaxmindPlugin, {
     fn config_schema(&self) -> Option<&str> {
         Some(PluginConfig::config_schema())
     }
+
+    metrics_static = METRICS;
 });
