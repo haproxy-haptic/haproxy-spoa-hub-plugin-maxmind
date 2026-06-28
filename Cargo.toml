@@ -14,7 +14,7 @@ crate-type = ["cdylib", "rlib"]
 # Plugin still loads on v0.5.x hubs (append-only ABI; old hubs read
 # only what they know and the install becomes a no-op).
 haproxy-spoa-hub-plugin-api = "0.7"
-maxminddb = "0.28"
+maxminddb = "0.29"
 serde = "1"
 log = "0.4"
 
