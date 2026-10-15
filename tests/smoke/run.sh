@@ -41,7 +41,7 @@ if [[ ! -f "${ARTIFACT}" ]]; then
 fi
 if [[ ! -f "${MMDB_SOURCE}" ]]; then
     echo "ERROR: MaxMind-DB fixture missing: ${MMDB_SOURCE}"
-    echo "Ensure the submodule is checked out (GIT_SUBMODULE_STRATEGY=recursive)."
+    echo "Check out the submodule: git submodule update --init --recursive"
     exit 1
 fi
 cp "${ARTIFACT}" "${SCRIPT_DIR}/plugin.so"
