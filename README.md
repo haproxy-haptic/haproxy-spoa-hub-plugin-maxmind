@@ -1,6 +1,6 @@
 # HAProxy SPOA Hub — MaxMind Plugin
 
-A [haproxy-spoa-hub](https://gitlab.com/haproxy-haptic/haproxy-spoa-hub) plugin that performs MaxMind GeoIP lookups. Supports every MaxMind MMDB database type — City, Country, ASN, Anonymous IP, ISP, Connection Type, Domain — by addressing arbitrary field paths inside the record.
+A [haproxy-spoa-hub](https://github.com/haproxy-haptic/haproxy-spoa-hub) plugin that performs MaxMind GeoIP lookups. Supports every MaxMind MMDB database type — City, Country, ASN, Anonymous IP, ISP, Connection Type, Domain — by addressing arbitrary field paths inside the record.
 
 ## Overview
 
@@ -12,7 +12,7 @@ Databases are read once at init via the in-memory MMDB reader — there is no pe
 
 ### Prerequisites
 
-- [haproxy-spoa-hub](https://gitlab.com/haproxy-haptic/haproxy-spoa-hub) built and running
+- [haproxy-spoa-hub](https://github.com/haproxy-haptic/haproxy-spoa-hub) built and running
 - One or more MaxMind MMDB database files (e.g., [GeoLite2-City](https://dev.maxmind.com/geoip/geolite2-free-geolocation-data))
 - Rust toolchain (>= 1.86) for building the plugin
 
