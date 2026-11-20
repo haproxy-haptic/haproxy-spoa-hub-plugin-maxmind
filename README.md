@@ -135,7 +135,7 @@ curl -v http://localhost:80/ 2>&1 | grep -E 'X-(Country|ASN)'
 
 ### How field paths work
 
-A field path is an ordered list of map keys, just like the path arguments to the HAProxy Enterprise `maxmind-lookup` converter. To find valid paths, consult the MaxMind MMDB schema for your database — for example by running `mmdblookup` against your file and reading the JSON output. Common paths:
+A field path is an ordered list of map keys and array indexes, just like the path arguments to the HAProxy Enterprise `maxmind-lookup` converter. A segment of decimal digits indexes an array (`"0"` is the first element) and `-` followed by digits counts from the end (`"-1"` is the last); every other segment is a map key. To find valid paths, consult the MaxMind MMDB schema for your database — for example by running `mmdblookup` against your file and reading the JSON output. Common paths:
 
 | Path | Database | Leaf type | Example value |
 |---|---|---|---|
@@ -143,6 +143,8 @@ A field path is an ordered list of map keys, just like the path arguments to the
 | `["country", "names", "de"]` | City / Country | string | `Schweden` |
 | `["country", "is_in_european_union"]` | City / Country | bool | `true` |
 | `["city", "names", "en"]` | City | string | `Stockholm` |
+| `["subdivisions", "0", "iso_code"]` | City | string | `AB` (first subdivision) |
+| `["subdivisions", "-1", "names", "en"]` | City | string | most specific subdivision's name |
 | `["location", "latitude"]` | City | float | `59.3293` |
 | `["location", "time_zone"]` | City | string | `Europe/Stockholm` |
 | `["postal", "code"]` | City | string | `11122` |
@@ -153,7 +155,7 @@ A field path is an ordered list of map keys, just like the path arguments to the
 | `["connection_type"]` | Connection Type | string | `Cable/DSL` |
 | `["domain"]` | Domain | string | `example.com` |
 
-Strings render verbatim, integers and floats use their canonical decimal form, and booleans become the literal `"true"` or `"false"`. Missing keys and addresses-not-in-database both yield an empty string with status `not_found`. A path that lands on a non-leaf node (map or array) yields an empty string with status `error` and a one-time warning naming the offending lookup.
+Strings render verbatim, integers and floats use their canonical decimal form, and booleans become the literal `"true"` or `"false"`. Missing keys, indexes past the end of an array and addresses-not-in-database yield an empty string with status `not_found`. A path that lands on a non-leaf node (map or array), or indexes a map, yields an empty string with status `error` and a one-time warning naming the offending lookup.
 
 ### Status variable
 
