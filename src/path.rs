@@ -110,18 +110,19 @@ pub fn compile_path(keys: &[String]) -> Vec<PathElement<'_>> {
 }
 
 fn compile_segment(segment: &str) -> PathElement<'_> {
-    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
-    if digits(segment) {
-        if let Ok(index) = segment.parse::<usize>() {
-            return PathElement::Index(index);
+    fn digits(s: &str) -> Option<usize> {
+        if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
         }
-    } else if let Some(from_end) = segment.strip_prefix('-').filter(|s| digits(s))
-        && let Ok(position) = from_end.parse::<usize>()
-        && position > 0
-    {
-        return PathElement::IndexFromEnd(position - 1);
+        s.parse().ok()
     }
-    PathElement::Key(segment)
+    if let Some(index) = digits(segment) {
+        return PathElement::Index(index);
+    }
+    match segment.strip_prefix('-').and_then(digits) {
+        Some(position) if position > 0 => PathElement::IndexFromEnd(position - 1),
+        _ => PathElement::Key(segment),
+    }
 }
 
 /// Render a field path as a slash-separated display string for use in log
