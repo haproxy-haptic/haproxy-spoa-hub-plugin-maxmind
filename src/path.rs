@@ -97,10 +97,31 @@ impl<'de> Visitor<'de> for AnyLeafVisitor {
 }
 
 /// Build the `PathElement` slice required by [`maxminddb::LookupResult::decode_path`]
-/// from an operator-supplied list of map keys. The returned vector borrows from
-/// `keys`, so it must not outlive the input.
+/// from an operator-supplied path. The returned vector borrows from `keys`, so it
+/// must not outlive the input.
+///
+/// A segment of decimal digits indexes an array from the start (`"0"` is the first
+/// element), and `-` followed by digits counts from the end (`"-1"` is the last),
+/// as in `mmdblookup` and HAProxy Enterprise's `maxmind-lookup`. Every other
+/// segment is a map key. City databases keep subdivisions in an array, so
+/// `["subdivisions", "0", "iso_code"]` reaches the first subdivision's code.
 pub fn compile_path(keys: &[String]) -> Vec<PathElement<'_>> {
-    keys.iter().map(|k| PathElement::Key(k.as_str())).collect()
+    keys.iter().map(|k| compile_segment(k)).collect()
+}
+
+fn compile_segment(segment: &str) -> PathElement<'_> {
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    if digits(segment) {
+        if let Ok(index) = segment.parse::<usize>() {
+            return PathElement::Index(index);
+        }
+    } else if let Some(from_end) = segment.strip_prefix('-').filter(|s| digits(s))
+        && let Ok(position) = from_end.parse::<usize>()
+        && position > 0
+    {
+        return PathElement::IndexFromEnd(position - 1);
+    }
+    PathElement::Key(segment)
 }
 
 /// Render a field path as a slash-separated display string for use in log
@@ -173,6 +194,29 @@ mod tests {
         assert!(matches!(elements[0], PathElement::Key("country")));
         assert!(matches!(elements[1], PathElement::Key("names")));
         assert!(matches!(elements[2], PathElement::Key("de")));
+    }
+
+    #[test]
+    fn compile_path_turns_numeric_segments_into_indexes() {
+        let keys: Vec<String> = ["subdivisions", "0", "iso_code", "-1", "-0", "1a", "+1", ""]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let elements = compile_path(&keys);
+        assert_eq!(
+            elements,
+            vec![
+                PathElement::Key("subdivisions"),
+                PathElement::Index(0),
+                PathElement::Key("iso_code"),
+                PathElement::IndexFromEnd(0),
+                // not an index: kept as map keys
+                PathElement::Key("-0"),
+                PathElement::Key("1a"),
+                PathElement::Key("+1"),
+                PathElement::Key(""),
+            ]
+        );
     }
 
     #[test]

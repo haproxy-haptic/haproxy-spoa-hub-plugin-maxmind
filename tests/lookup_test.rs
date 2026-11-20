@@ -93,6 +93,75 @@ fn extract_non_leaf_field_returns_empty_and_error_status() {
     assert_eq!(status, LookupStatus::Error);
 }
 
+// --- Array elements: a numeric segment indexes an array (#7) ---
+
+#[test]
+fn numeric_segment_indexes_the_subdivisions_array() {
+    let dbs = databases(&[("city", "GeoIP2-City-Test.mmdb")]);
+    // 2.125.160.216 -> subdivisions [ENG (England), WBK (West Berkshire)]
+    let first = compile(lookup(
+        "sub0",
+        "city",
+        &["subdivisions", "0", "iso_code"],
+        "out",
+    ));
+    let (value, status) = execute_lookup(&first, &dbs, ip("2.125.160.216"), &warn());
+    assert_eq!((value.as_str(), status), ("ENG", LookupStatus::Ok));
+
+    let second = compile(lookup(
+        "sub1",
+        "city",
+        &["subdivisions", "1", "names", "en"],
+        "out",
+    ));
+    let (value, status) = execute_lookup(&second, &dbs, ip("2.125.160.216"), &warn());
+    assert_eq!(
+        (value.as_str(), status),
+        ("West Berkshire", LookupStatus::Ok)
+    );
+}
+
+#[test]
+fn negative_segment_counts_from_the_end_of_the_array() {
+    let dbs = databases(&[("city", "GeoIP2-City-Test.mmdb")]);
+    let last = compile(lookup(
+        "last",
+        "city",
+        &["subdivisions", "-1", "iso_code"],
+        "out",
+    ));
+    let (value, status) = execute_lookup(&last, &dbs, ip("2.125.160.216"), &warn());
+    assert_eq!((value.as_str(), status), ("WBK", LookupStatus::Ok));
+    // one subdivision only: the last is also the first
+    let (value, status) = execute_lookup(&last, &dbs, ip("81.2.69.142"), &warn());
+    assert_eq!((value.as_str(), status), ("ENG", LookupStatus::Ok));
+}
+
+#[test]
+fn index_past_the_end_returns_not_found() {
+    let dbs = databases(&[("city", "GeoIP2-City-Test.mmdb")]);
+    // 81.2.69.142 has a single subdivision
+    let l = compile(lookup(
+        "sub1",
+        "city",
+        &["subdivisions", "1", "iso_code"],
+        "out",
+    ));
+    let (value, status) = execute_lookup(&l, &dbs, ip("81.2.69.142"), &warn());
+    assert!(value.is_empty());
+    assert_eq!(status, LookupStatus::NotFound);
+}
+
+#[test]
+fn index_into_a_map_returns_error() {
+    let dbs = databases(&[("city", "GeoIP2-City-Test.mmdb")]);
+    // "country" is a map: an index does not fit its shape, like a key on a leaf
+    let l = compile(lookup("bad", "city", &["country", "0"], "out"));
+    let (value, status) = execute_lookup(&l, &dbs, ip("89.160.20.128"), &warn());
+    assert!(value.is_empty());
+    assert_eq!(status, LookupStatus::Error);
+}
+
 #[test]
 fn extract_localized_name_via_path_returns_value() {
     let dbs = databases(&[("city", "GeoIP2-City-Test.mmdb")]);

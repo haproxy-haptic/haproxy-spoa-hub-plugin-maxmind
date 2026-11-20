@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Array indexes in lookup paths** ([#7](https://github.com/haproxy-haptic/haproxy-spoa-hub-plugin-maxmind/issues/7)): a segment of decimal digits indexes an array and `-N` counts from the end, so `["subdivisions", "0", "iso_code"]` reaches a region. An index past the end is `not_found`; an index on a map is `error`. A digits-only segment used to be looked up as a map key, which no MaxMind or DB-IP database has.
+
 ### Changed
 
 - Development and releases moved to GitHub (`https://github.com/haproxy-haptic/haproxy-spoa-hub-plugin-maxmind`); GitLab is a read-only mirror.
