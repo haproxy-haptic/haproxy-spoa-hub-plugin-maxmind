@@ -1,0 +1,12 @@
+[[plugins]]
+name = "maxmind"
+library = "libmaxmind_plugin.so"
+messages = ["lookup"]
+[plugins.params.databases]
+city = { path = "$repo/tests/fixtures/MaxMind-DB/test-data/GeoIP2-City-Test.mmdb" }
+[[plugins.params.lookups]]
+name = "country"
+database = "city"
+message = "lookup"
+path = ["country", "iso_code"]
+output_var = "country"
