@@ -74,3 +74,11 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html):
 - **PATCH**: Bug fixes, performance improvements, documentation updates
 
 Pre-release versions use suffixes: `v0.1.0-alpha.1`, `v0.1.0-beta.1`, `v0.1.0-rc.1`.
+
+## Profile-guided builds
+
+Each pull request and release builds the instrumented plugin for all shipping
+architectures. The shared driver pins the checksum of the v0.13.0 hub for
+training, loads the MaxMind library, and checks its lookup reply against
+`ci/pgo/requests.json`. Update the driver pin when changing the training host.
+The separate image smoke test also checks compatibility with the latest hub.

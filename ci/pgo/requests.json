@@ -1,0 +1,11 @@
+[
+  {
+    "message": "lookup",
+    "args": {
+      "input": "89.160.20.128"
+    },
+    "expect": {
+      "maxmind.country": "SE"
+    }
+  }
+]
